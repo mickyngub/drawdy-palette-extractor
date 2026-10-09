@@ -1,5 +1,6 @@
 import type { DrawdyElementSchema } from "@drawdy/driver-protocol";
-import { labelColour } from "./shared/colour";
+import { below, centredIn, type Rect } from "./lib/free-spot";
+import { contrastRatio, labelColour, parseHex } from "./shared/colour";
 import { nearestCssName } from "./shared/css-names";
 import type { Layout, PaletteSpec } from "./shared/spec";
 
@@ -25,6 +26,25 @@ export const CHAR_EM = 0.6;
 // The host pads a shape's label by 8 on each side.
 const SHAPE_TEXT_PADDING = 8;
 const LINE_HEIGHT = 1.4;
+// Drawdy's board colours (--surface-canvas) in light and dark theme.
+export const BOARD_COLOURS = { light: "#f4f4f5", dark: "#18181b" } as const;
+// Upper case, like the swatch colours, so the host's theme swap leaves it alone.
+export const NEUTRAL_STROKE = "#A1A1AA";
+const NEAR_BOARD_CONTRAST = 1.4;
+
+export function nearBoard(hex: string, board: string): boolean {
+    const a = parseHex(hex);
+    const b = parseHex(board);
+    return !!a && !!b && contrastRatio(a, b) < NEAR_BOARD_CONTRAST;
+}
+
+// Properties of a replaced palette that the new one keeps.
+export type Carry = Partial<{
+    groupId: string;
+    frameId: string;
+    layer: number;
+    opacity: number;
+}>;
 
 export function barHeight(width: number): number {
     return Math.min(160, Math.max(64, Math.round(width / 5)));
@@ -184,6 +204,8 @@ export function paletteElements({
     origin,
     width,
     ink,
+    board = BOARD_COLOURS.light,
+    carry = {},
     driverId,
     generateId,
 }: {
@@ -191,24 +213,36 @@ export function paletteElements({
     origin: Point;
     width: number;
     ink: string;
+    board?: string;
+    carry?: Carry;
     driverId: string;
     generateId: () => string;
 }): DrawdyElementSchema[] {
     const plan = planPalette(spec, width);
-    const groupId = generateId();
-    const part = { [driverId]: { v: 1, part: true } };
+    const groupId = carry.groupId ?? generateId();
+    const rectIds = plan.swatches.map(() => generateId());
+    const nameIds = plan.swatches.flatMap((s) => (s.name ? [generateId()] : []));
+    const members = [...rectIds, ...nameIds];
+    // Edit selected finds the whole palette from these ids, whichever member is selected.
+    const part = { [driverId]: { v: 1, part: true, first: rectIds[0] } };
+    const shared = {
+        groupId,
+        ...(carry.frameId ? { frameId: carry.frameId } : {}),
+        ...(carry.layer !== undefined ? { layer: carry.layer } : {}),
+        ...(carry.opacity !== undefined ? { opacity: carry.opacity } : {}),
+    };
     const rects: DrawdyElementSchema[] = plan.swatches.map((s, i) => ({
         type: "shape",
         componentType: "rect",
-        drawdyElementId: generateId(),
-        groupId,
+        drawdyElementId: rectIds[i],
+        ...shared,
         x: origin.x + s.x,
         y: origin.y,
         width: s.width,
         height: plan.rowHeight,
         // Upper case so the host's theme swap, which matches its own lower
         // case palette hexes exactly, never repaints a swatch in dark mode.
-        strokeColor: s.hex,
+        strokeColor: nearBoard(s.hex, board) ? NEUTRAL_STROKE : s.hex,
         fillColor: s.hex,
         fillStyle: "solid",
         strokeWidth: 1,
@@ -223,15 +257,16 @@ export function paletteElements({
                   textVerticalAlign: "middle" as const,
               }
             : {}),
-        meta: i === 0 ? { [driverId]: { v: 1, spec } } : part,
+        meta: i === 0 ? { [driverId]: { v: 1, spec, members } } : part,
     }));
     const names: DrawdyElementSchema[] = [];
+    let nameIndex = 0;
     for (const s of plan.swatches) {
         if (!s.name) continue;
         names.push({
             type: "text",
-            drawdyElementId: generateId(),
-            groupId,
+            drawdyElementId: nameIds[nameIndex++],
+            ...shared,
             x: origin.x + s.x,
             y: origin.y + plan.rowHeight + NAME_GAP,
             width: s.width,
@@ -243,16 +278,6 @@ export function paletteElements({
         });
     }
     return [...rects, ...names];
-}
-
-export function centredOrigin(
-    view: { x: number; y: number; width: number; height: number },
-    size: { width: number; height: number }
-): Point {
-    return {
-        x: view.x + (view.width - size.width) / 2,
-        y: view.y + (view.height - size.height) / 2,
-    };
 }
 
 // Read from the swatch corners rather than the elements' bounding rects, so
@@ -273,16 +298,18 @@ export function rowFrame(
     };
 }
 
-export const SOURCE_GAP = 24;
-
-export function belowSource(rect: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-}): { origin: Point; width: number } {
-    return {
-        origin: { x: rect.x, y: rect.y + rect.height + SOURCE_GAP },
-        width: Math.max(MIN_ROW_WIDTH, rect.width),
-    };
+// Under the source at its width (at least 240), or 480 wide in the middle of the visible area.
+export function preferredRect(
+    spec: Pick<PaletteSpec, "colours" | "layout">,
+    anchor: Rect | null,
+    area: Rect | null
+): Rect {
+    if (anchor) {
+        const width = Math.max(MIN_ROW_WIDTH, anchor.width);
+        return below(anchor, width, planPalette(spec, width).height);
+    }
+    const height = planPalette(spec, PLACE_WIDTH).height;
+    return area
+        ? centredIn(area, PLACE_WIDTH, height)
+        : { x: 0, y: 0, width: PLACE_WIDTH, height };
 }

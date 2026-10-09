@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { PLACE_GAP } from "../src/lib/free-spot";
 import {
     barHeight,
-    belowSource,
-    centredOrigin,
+    BOARD_COLOURS,
     fitFont,
     hexFont,
     nameFont,
+    nearBoard,
+    NEUTRAL_STROKE,
     paletteElements,
     planPalette,
+    preferredRect,
     rowFrame,
     rowGeometry,
 } from "../src/layout";
@@ -96,7 +99,7 @@ test("a plan names each swatch and picks a readable label colour", () => {
     assert.ok(plan.height > plan.rowHeight);
 });
 
-test("the elements share one group and only the first carries the spec", () => {
+test("the elements share one group and only the first carries the spec and member ids", () => {
     const elements = paletteElements({
         spec: SPEC,
         origin: { x: 100, y: 50 },
@@ -111,15 +114,18 @@ test("the elements share one group and only the first carries the spec", () => {
     assert.equal(rects.length, 4);
     assert.equal(texts.length, 4);
     assert.ok(elements.every((e) => e.groupId === "id-0"));
-    assert.deepEqual(elements[0].meta, { [DRIVER_ID]: { v: 1, spec: SPEC } });
+    const members = elements.map((e) => e.drawdyElementId);
+    assert.deepEqual(elements[0].meta, {
+        [DRIVER_ID]: { v: 1, spec: SPEC, members },
+    });
     assert.ok(
-        elements
-            .slice(1)
-            .every(
-                (e) =>
-                    JSON.stringify(e.meta) ===
-                    JSON.stringify({ [DRIVER_ID]: { v: 1, part: true } })
-            )
+        elements.slice(1).every(
+            (e) =>
+                JSON.stringify(e.meta) ===
+                JSON.stringify({
+                    [DRIVER_ID]: { v: 1, part: true, first: members[0] },
+                })
+        )
     );
     const first = rects[0];
     assert.equal(first.type, "shape");
@@ -200,19 +206,74 @@ test("narrow share bar slivers keep their swatch but lose labels that cannot fit
     assert.equal(elements.filter((e) => e.type === "text").length, 1);
 });
 
-test("placement centres in the view or sits 24 units under the source image", () => {
-    assert.deepEqual(
-        centredOrigin(
-            { x: -100, y: -200, width: 1000, height: 800 },
-            { width: 480, height: 140 }
-        ),
-        { x: 160, y: 130 }
+test("placement prefers 40 units under the source, or the middle of the visible area", () => {
+    const under = preferredRect(SPEC, { x: 10, y: 20, width: 600, height: 400 }, null);
+    assert.equal(under.x, 10);
+    assert.equal(under.y, 20 + 400 + PLACE_GAP);
+    assert.equal(under.width, 600);
+    assert.equal(under.height, planPalette(SPEC, 600).height);
+    assert.equal(
+        preferredRect(SPEC, { x: 0, y: 0, width: 90, height: 90 }, null).width,
+        240
     );
-    assert.deepEqual(belowSource({ x: 10, y: 20, width: 600, height: 400 }), {
-        origin: { x: 10, y: 444 },
-        width: 600,
+    const middle = preferredRect(
+        SPEC,
+        null,
+        { x: -100, y: -200, width: 1000, height: 800 }
+    );
+    assert.equal(middle.width, 480);
+    assert.equal(middle.x, 160);
+    assert.equal(middle.y, -200 + (800 - middle.height) / 2);
+});
+
+test("a swatch close to the board colour gets a neutral edge", () => {
+    assert.equal(nearBoard("#FFFFFF", BOARD_COLOURS.light), true);
+    assert.equal(nearBoard("#E6E8EB", BOARD_COLOURS.light), true);
+    assert.equal(nearBoard("#0F172A", BOARD_COLOURS.dark), true);
+    assert.equal(nearBoard("#0F172A", BOARD_COLOURS.light), false);
+    assert.equal(nearBoard("#EF4444", BOARD_COLOURS.dark), false);
+    const elements = paletteElements({
+        spec: {
+            ...SPEC,
+            colours: [
+                { hex: "#ffffff", share: 0.5 },
+                { hex: "#ef4444", share: 0.5 },
+            ],
+        },
+        origin: { x: 0, y: 0 },
+        width: 480,
+        ink: "#000000",
+        board: BOARD_COLOURS.light,
+        driverId: DRIVER_ID,
+        generateId: ids(),
     });
-    assert.equal(belowSource({ x: 0, y: 0, width: 90, height: 90 }).width, 240);
+    const [white, red] = elements.filter((e) => e.type === "shape");
+    if (white.type !== "shape" || red.type !== "shape") return;
+    assert.equal(white.strokeColor, NEUTRAL_STROKE);
+    assert.equal(red.strokeColor, "#EF4444");
+});
+
+test("a replaced palette's group, frame, layer and opacity carry over", () => {
+    const elements = paletteElements({
+        spec: SPEC,
+        origin: { x: 0, y: 0 },
+        width: 480,
+        ink: "#000000",
+        carry: { groupId: "outer", frameId: "frame-1", layer: 3, opacity: 0.5 },
+        driverId: DRIVER_ID,
+        generateId: ids(),
+    });
+    assert.ok(
+        elements.every(
+            (e) =>
+                e.groupId === "outer" &&
+                e.frameId === "frame-1" &&
+                e.type !== "component" &&
+                e.layer === 3 &&
+                e.opacity === 0.5
+        )
+    );
+    assert.ok(!elements.some((e) => e.drawdyElementId === "outer"));
 });
 
 test("the row frame comes from the swatch corners and ignores the names", () => {
