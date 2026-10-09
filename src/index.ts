@@ -689,17 +689,13 @@ async function update(spec: PaletteSpec): Promise<void> {
     const locked = existing.some((e) => e.locked === true);
     const oldIds = existing.map((e) => e.id);
 
-    const board = boardContext();
-    const rect = await findFreeRect(
-        board,
-        {
-            x: origin.x,
-            y: origin.y,
-            width,
-            height: planPalette(spec, width).height,
-        },
-        oldIds
-    );
+    // An update stays where the old row was, even if it grew into a neighbour.
+    const rect = {
+        x: origin.x,
+        y: origin.y,
+        width,
+        height: planPalette(spec, width).height,
+    };
     if (oldIds.length > 0) {
         const removed = await driver.issueCommand({
             type: "command:scene:remove-drawdy-elements",
@@ -744,6 +740,6 @@ async function update(spec: PaletteSpec): Promise<void> {
         origin: { x: rect.x, y: rect.y },
         width: rect.width,
     };
-    await revealAndSelect(board, added.ids, rect);
+    await revealAndSelect(boardContext(), added.ids, rect);
     post({ type: "placed", updated: true, rotationReset, undoSteps });
 }
