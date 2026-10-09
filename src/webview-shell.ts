@@ -171,6 +171,7 @@ input[type="range"]::-moz-range-thumb {
 .seg button {
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 24px;
     padding: 3px 6px;
     border: 1px solid var(--drawdy-border, #e5e7eb);
     background: transparent;
@@ -295,13 +296,25 @@ footer {
     background: var(--drawdy-surface, transparent);
 }
 .status {
-    min-height: 15px;
+    min-height: 14px;
     font-size: 10px;
     color: var(--drawdy-muted-foreground, #6b7280);
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
+.banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 4px 4px 8px;
+    border-radius: var(--drawdy-radius-sm, 4px);
+    background: var(--drawdy-surface2, rgba(127, 127, 127, 0.12));
+    font-size: 11px;
+}
+.banner[hidden] { display: none; }
 .status.bad { color: var(--drawdy-destructive, #dc2626); }
 .status.good { color: var(--drawdy-success, #16a34a); }
 .actions { display: flex; justify-content: flex-end; gap: 6px; }
@@ -323,7 +336,7 @@ footer {
     border-color: var(--drawdy-primary, #4f46e5);
     color: var(--drawdy-primary-foreground, #ffffff);
 }
-.btn.small { padding: 3px 9px; font-size: 10px; }
+.btn.small { min-height: 24px; padding: 3px 9px; font-size: 10px; }
 `;
 
 const BODY = `
@@ -357,10 +370,14 @@ const BODY = `
     </section>
 </main>
 <footer>
+    <div class="banner" id="edit-banner" hidden>
+        <span>Editing a palette from the board.</span>
+        <button class="btn small" id="stop-editing" type="button">Stop editing</button>
+    </div>
     <div class="status" id="status" role="status" aria-live="polite"></div>
     <div class="actions">
         <button class="btn" id="edit-selected" type="button" hidden>Edit selected</button>
-        <button class="btn" id="stop-editing" type="button" hidden>Stop editing</button>
+        <button class="btn" id="place-new" type="button" hidden>Place as new</button>
         <button class="btn primary" id="place" type="button" disabled>Place on board</button>
     </div>
 </footer>
@@ -373,7 +390,7 @@ export function shellHtml(js: string): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>:root{/*__DRAWDY_STYLING__*/}</style>
+<style id="drawdy-styling">:root{/*__DRAWDY_STYLING__*/}</style>
 <style>${CSS}</style>
 </head>
 <body>

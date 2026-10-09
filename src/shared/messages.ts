@@ -23,6 +23,7 @@ export type WebviewToDriver =
     | { type: "stop-editing" }
     | { type: "place"; spec: PaletteSpec }
     | { type: "update"; spec: PaletteSpec }
+    | { type: "history"; action: "undo" | "redo" }
     | { type: "close" };
 
 export type DriverToWebview =
@@ -31,6 +32,7 @@ export type DriverToWebview =
           params?: Record<string, unknown>;
           selection: SelectionInfo;
       }
+    | { type: "theme"; css: string }
     | { type: "selection"; selection: SelectionInfo }
     | {
           type: "source";
@@ -38,7 +40,13 @@ export type DriverToWebview =
           ref: BoardSource;
           label: string;
           forEdit: boolean;
+          note: string | null;
       }
     | { type: "edit"; spec: PaletteSpec }
-    | { type: "placed"; updated: boolean }
+    | {
+          type: "placed";
+          updated: boolean;
+          rotationReset: boolean;
+          undoSteps: number;
+      }
     | { type: "error"; message: string };

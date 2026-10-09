@@ -24,7 +24,9 @@ import {
     type SortKey,
     type SourceRef,
 } from "../src/shared/spec";
+import { placedStatus, sameSource } from "./lib/edit";
 import { FORMAT_LABELS, formatExport } from "./lib/exports";
+import { wireKeys } from "./lib/keys";
 import {
     extractFromPoints,
     histogram,
@@ -60,6 +62,9 @@ type Source = {
 };
 
 const PARAMS_DEBOUNCE_MS = 400;
+const BUSY_TIMEOUT_MS = 20_000;
+const EDITING_STATUS = "Editing this palette. Update on board saves it.";
+const NEW_PALETTE_STATUS = "Stopped editing: this image makes a new palette.";
 const UPLOAD_HINT = "Click to upload an image, or drop or paste one here.";
 const EDIT_HINT =
     "The image behind this palette is not loaded. Upload it again to change the number of colours.";
@@ -111,7 +116,12 @@ const editButton = document.getElementById(
     "edit-selected"
 ) as HTMLButtonElement;
 const stopButton = document.getElementById("stop-editing") as HTMLButtonElement;
+const editBanner = document.getElementById("edit-banner") as HTMLDivElement;
+const placeNewButton = document.getElementById("place-new") as HTMLButtonElement;
 const placeButton = document.getElementById("place") as HTMLButtonElement;
+const stylingTag = document.getElementById(
+    "drawdy-styling"
+) as HTMLStyleElement;
 const clip = document.getElementById("clip") as HTMLTextAreaElement;
 
 let params: Params = { ...DEFAULT_PARAMS };
@@ -121,6 +131,7 @@ let roles: Roles | null = null;
 let selection: SelectionInfo = { count: 0, images: 0, editable: false };
 let editing: { source?: SourceRef } | null = null;
 let busy = false;
+let busyTimer = 0;
 let paramsTimer = 0;
 let adoptToken = 0;
 
@@ -141,7 +152,35 @@ function queueParams(): void {
 
 function setStatus(text: string, tone: "" | "good" | "bad" = ""): void {
     statusLine.textContent = text;
+    statusLine.title = text;
     statusLine.className = `status${tone ? ` ${tone}` : ""}`;
+}
+
+// Busy until the driver answers with a source, placed or error.
+function startBusy(): void {
+    busy = true;
+    if (busyTimer) clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => {
+        stopBusy();
+        setStatus("Drawdy didn't answer. Try again.", "bad");
+    }, BUSY_TIMEOUT_MS) as unknown as number;
+    renderFooter();
+}
+
+function stopBusy(): void {
+    if (busyTimer) clearTimeout(busyTimer);
+    busyTimer = 0;
+    busy = false;
+    renderFooter();
+}
+
+// A different image makes a new palette, so Update must not point at the old one.
+function leaveEditForNewSource(): boolean {
+    if (!editing || sameSource(source?.ref, editing.source)) return false;
+    editing = null;
+    send({ type: "stop-editing" });
+    render();
+    return true;
 }
 
 function plural(n: number, word: string): string {
@@ -391,8 +430,10 @@ function renderSelection(): void {
 }
 
 function renderFooter(): void {
+    editBanner.hidden = !editing;
     editButton.hidden = !selection.editable || !!editing;
-    stopButton.hidden = !editing;
+    placeNewButton.hidden = !editing;
+    placeNewButton.disabled = palette.length === 0 || busy;
     placeButton.textContent = editing ? "Update on board" : "Place on board";
     placeButton.disabled = palette.length === 0 || busy;
     renderSelection();
@@ -407,7 +448,8 @@ function render(): void {
 async function adopt(
     inputs: (Blob | string)[],
     ref: SourceRef | null,
-    keepPalette: boolean
+    keepPalette: boolean,
+    failure: string
 ): Promise<boolean> {
     const token = ++adoptToken;
     const decoded = (await Promise.all(inputs.map(decodeImage))).filter(
@@ -418,7 +460,7 @@ async function adopt(
         return false;
     }
     if (decoded.length === 0) {
-        setStatus("That image could not be read.", "bad");
+        setStatus(failure, "bad");
         return false;
     }
     const budget = Math.floor(MAX_PIXELS / decoded.length);
@@ -446,7 +488,8 @@ async function adopt(
 
 async function adoptUpload(file: File): Promise<void> {
     setStatus("Reading the image…");
-    if (await adopt([file], null, false)) setStatus("");
+    if (await adopt([file], null, false, "That file could not be read as an image."))
+        setStatus(leaveEditForNewSource() ? NEW_PALETTE_STATUS : "");
 }
 
 function imageFileFrom(items: DataTransfer | null): File | null {
@@ -457,16 +500,17 @@ function imageFileFrom(items: DataTransfer | null): File | null {
     return null;
 }
 
-function place(): void {
+function place(asNew: boolean): void {
     if (palette.length === 0) {
         setStatus("Upload an image first.", "bad");
         return;
     }
-    busy = true;
-    renderFooter();
-    setStatus(editing ? "Updating…" : "Placing…");
+    if (busy) return;
+    const updating = !!editing && !asNew;
+    startBusy();
+    setStatus(updating ? "Updating…" : "Placing…");
     send(
-        editing
+        updating
             ? { type: "update", spec: currentSpec() }
             : { type: "place", spec: currentSpec() }
     );
@@ -486,10 +530,8 @@ function startEdit(spec: PaletteSpec): void {
     }
     palette = swatchesFromColours(spec.colours);
     if (!source) roles = pickRoles(palette);
-    busy = false;
-    setStatus(
-        "Editing the selected palette. Change it, then click Update on board."
-    );
+    stopBusy();
+    setStatus(EDITING_STATUS);
     render();
 }
 
@@ -531,6 +573,8 @@ function wire(): void {
         stage.classList.remove("dragover");
         const file = imageFileFrom(event.dataTransfer);
         if (file) void adoptUpload(file);
+        else if (event.dataTransfer?.files.length)
+            setStatus("That file is not an image.", "bad");
     });
     document.addEventListener("paste", (event) => {
         const file = imageFileFrom(event.clipboardData);
@@ -538,13 +582,12 @@ function wire(): void {
         event.preventDefault();
         void adoptUpload(file);
     });
-    document.addEventListener("keydown", (event) => {
-        if (event.key !== "Escape") return;
-        send({ type: "close" });
+    wireKeys({
+        history: (action) => send({ type: "history", action }),
+        close: () => send({ type: "close" }),
     });
     useSelection.addEventListener("click", () => {
-        busy = true;
-        renderFooter();
+        startBusy();
         setStatus("Reading the selection…");
         send({ type: "read-selection" });
     });
@@ -556,7 +599,8 @@ function wire(): void {
         send({ type: "edit-selected" });
     });
     stopButton.addEventListener("click", stopEdit);
-    placeButton.addEventListener("click", place);
+    placeNewButton.addEventListener("click", () => place(true));
+    placeButton.addEventListener("click", () => place(false));
 }
 
 async function handle(message: DriverToWebview): Promise<void> {
@@ -569,6 +613,10 @@ async function handle(message: DriverToWebview): Promise<void> {
             render();
             return;
         }
+        case "theme": {
+            stylingTag.textContent = `:root{${message.css}}`;
+            return;
+        }
         case "selection": {
             selection = message.selection;
             renderFooter();
@@ -578,12 +626,20 @@ async function handle(message: DriverToWebview): Promise<void> {
             const ok = await adopt(
                 message.images,
                 message.ref,
-                message.forEdit
+                message.forEdit,
+                "The selected image could not be read."
             );
-            busy = false;
-            renderFooter();
-            if (ok && !message.forEdit)
-                setStatus(`Read ${message.label}.`, "good");
+            stopBusy();
+            if (!ok) return;
+            const note = typeof message.note === "string" ? message.note : null;
+            if (message.forEdit) {
+                if (note) setStatus(`${EDITING_STATUS} ${note}`);
+                return;
+            }
+            const parts = [`Read ${message.label}.`];
+            if (note) parts.push(note);
+            if (leaveEditForNewSource()) parts.push(NEW_PALETTE_STATUS);
+            setStatus(parts.join(" "), "good");
             return;
         }
         case "edit": {
@@ -591,19 +647,17 @@ async function handle(message: DriverToWebview): Promise<void> {
             return;
         }
         case "placed": {
-            busy = false;
-            renderFooter();
-            setStatus(
-                message.updated
-                    ? "Updated the palette on the board."
-                    : "Placed on the board.",
-                "good"
-            );
+            stopBusy();
+            if (!message.updated && editing) {
+                editing = null;
+                send({ type: "stop-editing" });
+                render();
+            }
+            setStatus(placedStatus(message), "good");
             return;
         }
         case "error": {
-            busy = false;
-            renderFooter();
+            stopBusy();
             setStatus(message.message, "bad");
             return;
         }
