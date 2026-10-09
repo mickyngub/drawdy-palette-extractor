@@ -3,7 +3,7 @@
     "driverName": "Palette Extractor",
     "driverVersion": "1.0.0",
     "description": "Pull the main colours out of an image or a board selection. Upload, drop or paste an image, or read the images or shapes you have selected. See each colour's hex, share, nearest CSS name and contrast against white and dark backgrounds, plus Vibrant, Muted, Dark vibrant and Light muted roles. Copy any colour, export the palette as HEX, CSS variables, Tailwind 3, Tailwind 4 or JSON, and place a swatch row on the board that you can edit later.",
-    "icon": "icon.svg",
+    "icon": "icon.png",
     "main": "main.js",
     "permissions": [
         "dom",
