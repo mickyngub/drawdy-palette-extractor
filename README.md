@@ -2,6 +2,8 @@
 
 Pull the main colours out of any image, or out of anything already on your board. Check how readable each one is, copy the palette as code, and place a labelled swatch row on your Drawdy board.
 
+![Palette Extractor reads the six main colours of an image selected on the board and places a labelled swatch row under it.](https://raw.githubusercontent.com/mickyngub/drawdy-palette-extractor/main/docs/media/palette-extractor.gif)
+
 ## What it's for
 
 - **Moodboards and brand work**: get the palette of a photo, a logo or a screenshot in one click.

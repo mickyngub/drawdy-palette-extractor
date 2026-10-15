@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- a short GIF on the listing page that shows picking the colours out of an image on the board in action
+
 ## 1.0.1
 
 - a clearer listing page: what the extension is for, how to use it, tips and privacy, in plain words
